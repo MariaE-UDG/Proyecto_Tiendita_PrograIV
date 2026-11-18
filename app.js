@@ -1,226 +1,199 @@
 const API_URL = "http://127.0.0.1:8000/productos";
 
-// Selección de Elementos del DOM
 const formProducto = document.getElementById("formProducto");
 const tablaProductos = document.getElementById("tablaProductos");
 const totalProductos = document.getElementById("totalProductos");
 
-// Instancia global del gráfico (para poder destruirlo y recrearlo)
-let graficoVentasInstance = null;
+let graficoProductoInstance = null;
+let graficoFechaInstance = null;
 
+// Formateadores de números
+const formatoMoneda = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' });
+const formatoNumero = new Intl.NumberFormat('es-MX');
 
-// 1. Función para Cargar Productos (GET)
+// 1. Cargar Productos
 async function cargarProductos() {
     try {
         const respuesta = await fetch(API_URL);
         const productos = await respuesta.json();
-
         tablaProductos.innerHTML = "";
         totalProductos.textContent = `${productos.length} productos`;
 
-        if (productos.length === 0) {
-            tablaProductos.innerHTML = `
-                <tr>
-                    <td colspan="5" class="text-center text-muted py-5">
-                        No hay productos registrados en la tiendita.
-                    </td>
-                </tr>`;
-            return;
-        }
-
         productos.forEach(p => {
-            // Lógica de colores para el badge (igual que antes)
             const badgeClass = p.cantidad < 10 ? 'bg-stock-low' : 'bg-stock-ok';
-            
             const fila = document.createElement("tr");
             fila.innerHTML = `
                 <td class="ps-4 fw-bold text-secondary">#${p.id}</td>
                 <td class="fw-medium text-dark">${p.nombre}</td>
-                <td class="text-dark">$${p.precio}</td>
-                <td>
-                    <span class="badge badge-stock ${badgeClass}">
-                        ${p.cantidad} unidades
-                    </span>
-                </td>
+                <td>${formatoMoneda.format(p.precio)}</td>
+                <td><span class="badge bg-secondary">${p.categoria}</span></td>
+                <td><span class="badge badge-stock ${badgeClass}">${p.cantidad}</span></td>
                 <td class="text-end pe-4">
-                    <!-- Botón COMPRAR (Azul) -->
-                    <button class="btn btn-action btn-outline-blue me-1" onclick="comprarProducto(${p.id}, '${p.nombre}')">
-                        Comprar
-                    </button>
-                    <!-- Botón Eliminar (Rojo) -->
-                    <button class="btn btn-action btn-outline-red" onclick="eliminarProducto(${p.id})">
-                        Eliminar
-                    </button>
+                    <button class="btn btn-action btn-outline-primary me-1" onclick="comprarProducto(${p.id}, '${p.nombre}')">Comprar</button>
+                    <button class="btn btn-action btn-outline-danger" onclick="eliminarProducto(${p.id})">Eliminar</button>
                 </td>
             `;
             tablaProductos.appendChild(fila);
         });
-
-    } catch (error) {
-        console.error("Error al cargar productos:", error);
-    }
+    } catch (error) { console.error("Error al cargar productos:", error); }
 }
 
-// 2. Función para Agregar Producto (POST) - Sin cambios, solo limpieza
-async function agregarProducto(event){
+// 2. Agregar Producto
+async function agregarProducto(event) {
     event.preventDefault();
-
-    const nombre = document.getElementById("nombre").value;
-    const precio = document.getElementById("precio").value;
-    const cantidad = document.getElementById("cantidad").value;
-
-    const nuevoContenido = { nombre, precio, cantidad };
-    
+    const nuevoContenido = {
+        nombre: document.getElementById("nombre").value,
+        precio: parseFloat(document.getElementById("precio").value),
+        cantidad: parseInt(document.getElementById("cantidad").value),
+        categoria: document.getElementById("categoria").value
+    };
     try {
         const respuesta = await fetch(API_URL, {
-            method: "POST", 
-            headers: {"Content-Type": "application/json"}, 
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
             body: JSON.stringify(nuevoContenido)
         });
-
         if(respuesta.ok){
             formProducto.reset();
-            await cargarProductos();
-        } else {
-            console.error("Hubo un error al guardar el producto");
+            await actualizarTodo();
         }
-    } catch (error) {
-        console.log(error);
-    }
+    } catch (error) { console.log(error); }
 }
 
-// 3. NUEVA FUNCIÓN: Comprar Producto (PUT)
-
-// 3. NUEVA FUNCIÓN: Comprar Producto (PUT)
-async function comprarProducto(id_producto, nombre_producto) {
-    // Usamos prompt para pedir la cantidad de forma rápida y limpia
-    const cantidadInput = prompt(`¿Cuántas unidades de "${nombre_producto}" deseas comprar?`, "1");
+// 3. Comprar Producto
+async function comprarProducto(id, nombre) {
+    const cant = prompt(`¿Cuántas unidades de "${nombre}" deseas comprar?`, "1");
+    if (!cant || isNaN(cant) || cant <= 0) return;
     
-    // Si el usuario cancela o no ingresa nada, salimos
-    if (cantidadInput === null || cantidadInput.trim() === "") return;
-
-    const cantidad = parseInt(cantidadInput);
-
-    // Validación básica en el frontend
-    if (isNaN(cantidad) || cantidad <= 0) {
-        alert("Por favor, ingresa un número válido mayor a 0.");
-        return;
-    }
-
     try {
-        // Hacemos la petición PUT al endpoint específico de compra
-        const respuesta = await fetch(`${API_URL}/${id_producto}/comprar?cantidad_comprada=${cantidad}`, {
+        const respuesta = await fetch(`${API_URL}/${id}/comprar?cantidad_comprada=${cant}`, {
             method: "PUT",
             headers: {"Content-Type": "application/json"}
         });
-
         if (respuesta.ok) {
-            // Si todo sale bien, recargamos la tabla para ver el nuevo stock
-            await cargarProductos();
-            // 👇 Recargamos también el gráfico (ya refleja la nueva venta del CSV)
-            await cargarGrafico();
-            alert(`¡Compra exitosa! Se compraron ${cantidad} unidades de ${nombre_producto}.`);
+            await actualizarTodo();
+            alert(`Compra exitosa de ${cant} unidades.`);
         } else {
-            // Si el backend devuelve error (ej. no hay stock), mostramos el mensaje
-            const errorData = await respuesta.json();
-            alert(`Error: ${errorData.detail || "No se pudo realizar la compra"}`);
+            const err = await respuesta.json();
+            alert(`Error: ${err.detail}`);
         }
-    } catch (error) {
-        console.error("Error al conectar con el servidor:", error);
-        alert("Hubo un problema de conexión al intentar comprar.");
-    }
+    } catch (error) { alert("Error de conexión"); }
 }
 
-
-// 4. Función para Eliminar Producto (DELETE)
-async function eliminarProducto(id_producto){
-    if(!confirm("¿Estás seguro de eliminar este producto?")) return;
-
+// 4. Eliminar Producto
+async function eliminarProducto(id) {
+    if(!confirm("¿Seguro que deseas eliminar este producto del inventario?")) return;
     try {
-        const respuesta = await fetch(`${API_URL}/${id_producto}`, {
-            method: "DELETE", 
-            headers: {"Content-Type": "application/json"}
-        });
-
+        const respuesta = await fetch(`${API_URL}/${id}`, { method: "DELETE" });
         if(respuesta.ok){
-            await cargarProductos();
-        } else {
-            console.error("Hubo un error al eliminar");
+            await actualizarTodo();
         }
-    } catch (error) {
-        console.log(error);
-    }
+    } catch (error) { console.log(error); }
 }
 
-
-// Evento para el formulario
-formProducto.addEventListener("submit", agregarProducto);
-
-
-// ==========================================
-// LÓGICA PARA CHART.JS (TAREA EXTRA)
-// ==========================================
-
-async function cargarGrafico() {
-    const canvas = document.getElementById('graficoVentas');
-    if (!canvas) return;
-
+// 5. Cargar KPIs (Tarjetas) con formato
+async function cargarKPIs() {
     try {
-        // Llamamos a nuestro nuevo endpoint
-        const respuesta = await fetch("http://127.0.0.1:8000/ventas-por-categoria");
+        const respuesta = await fetch("http://127.0.0.1:8000/kpis");
         const datos = await respuesta.json();
+        
+        document.getElementById("kpiIngresos").textContent = formatoMoneda.format(datos.ingresos_totales);
+        document.getElementById("kpiTransacciones").textContent = formatoNumero.format(datos.transacciones);
+        document.getElementById("kpiProducto").textContent = datos.producto_estrella;
+    } catch (error) { console.error("Error KPIs:", error); }
+}
 
-        // Preparamos las etiquetas (Categorías) y los datos (Totales)
-        const etiquetas = datos.map(item => item.Categoria);
-        const valores = datos.map(item => item.Total_Venta);
-
-        // Configuración visual del gráfico
-        const ctx = canvas.getContext('2d');
-
-        // 👇 Destruimos el gráfico anterior si ya existía
-        if (graficoVentasInstance) {
-            graficoVentasInstance.destroy();
-        }
-
-        // 👇 Guardamos la nueva instancia en la variable global
-        graficoVentasInstance = new Chart(ctx, {
-            type: 'bar', // Tipo de gráfico: barras
+// 6. Gráficas (Productos y Fechas)
+async function cargarGraficos() {
+    try {
+        // Gráfica 1 (Barras - Por producto)
+        const resProd = await fetch("http://127.0.0.1:8000/ventas-por-producto");
+        const datosProd = await resProd.json();
+        const ctxProd = document.getElementById('graficoCategoria').getContext('2d');
+        
+        if (graficoProductoInstance) graficoProductoInstance.destroy();
+        
+        graficoProductoInstance = new Chart(ctxProd, {
+            type: 'bar',
             data: {
-                labels: etiquetas,
+                labels: datosProd.map(d => d.Producto), // Nombres exactos
                 datasets: [{
-                    label: 'Ventas Totales ($)',
-                    data: valores,
-                    backgroundColor: 'rgba(37, 99, 235, 0.7)', // Azul moderno (igual a tus botones)
-                    borderColor: 'rgba(37, 99, 235, 1)',
-                    borderWidth: 1,
-                    borderRadius: 6 // Bordes redondeados en las barras
+                    label: 'Ingresos',
+                    data: datosProd.map(d => d.Total_Venta),
+                    backgroundColor: 'rgba(37, 99, 235, 0.7)',
+                    borderRadius: 6
                 }]
             },
-            options: {
-                responsive: true,
-                plugins: {
-                    legend: { display: false } // Ocultamos la leyenda porque solo hay un dataset
+            options: { 
+                responsive: true, 
+                plugins: { 
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) { return 'Ingresos: ' + formatoMoneda.format(context.raw); }
+                        }
+                    }
                 },
                 scales: {
                     y: {
-                        beginAtZero: true,
                         ticks: {
-                            callback: function(value) {
-                                return '$' + value; // Formato de moneda en el eje Y
-                            }
+                            callback: function(value) { return '$' + formatoNumero.format(value); }
                         }
                     }
                 }
             }
         });
-    } catch (error) {
-        console.error("Error al cargar el gráfico:", error);
-    }
+
+        // Gráfica 2 (Líneas - Por fecha)
+        const resFec = await fetch("http://127.0.0.1:8000/ventas-por-fecha");
+        const datosFec = await resFec.json();
+        const ctxFec = document.getElementById('graficoFecha').getContext('2d');
+        
+        if (graficoFechaInstance) graficoFechaInstance.destroy();
+        
+        graficoFechaInstance = new Chart(ctxFec, {
+            type: 'line',
+            data: {
+                labels: datosFec.map(d => d.Fecha),
+                datasets: [{
+                    label: 'Ingresos por Día',
+                    data: datosFec.map(d => d.Total_Venta),
+                    backgroundColor: 'rgba(220, 53, 69, 0.2)',
+                    borderColor: 'rgba(220, 53, 69, 1)',
+                    borderWidth: 2,
+                    tension: 0.3,
+                    fill: true
+                }]
+            },
+            options: { 
+                responsive: true,
+                plugins: {
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) { return 'Ingresos: ' + formatoMoneda.format(context.raw); }
+                        }
+                    }
+                },
+                scales: {
+                    y: {
+                        ticks: {
+                            callback: function(value) { return '$' + formatoNumero.format(value); }
+                        }
+                    }
+                }
+            }
+        });
+
+    } catch (error) { console.error("Error gráficos:", error); }
 }
 
+// Función unificadora
+async function actualizarTodo() {
+    await cargarProductos();
+    await cargarKPIs();
+    await cargarGraficos();
+}
 
-// Modificamos el evento DOMContentLoaded para que cargue tabla y gráfico
-document.addEventListener("DOMContentLoaded", () => {
-    cargarProductos(); // Tu función original
-    cargarGrafico();   // La nueva función de la tarea
-});
+// Inicio
+document.addEventListener("DOMContentLoaded", actualizarTodo);
+formProducto.addEventListener("submit", agregarProducto);

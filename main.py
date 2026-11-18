@@ -1,18 +1,15 @@
 # ENCABEZADO
-# ENCABEZADO
 '''
-Titulo: Tiendita
+Titulo: Tiendita Full-Stack
 Autor: Esther Bautista
-Fecha de creación: 2026-11-04
-Descripción: Actualización del proyecto Tiendita con persistencia JSON.
+Fecha de creación: 2026-11-18
+Descripción: Persistencia en CSV, API con Pandas y Dashboard Chart.js
 '''
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
-import asyncio
 from pydantic import BaseModel, Field
 import pandas as pd
 import os
-import json # <-- Nueva librería para el JSON
 from datetime import datetime
 
 app = FastAPI()
@@ -27,172 +24,249 @@ app.add_middleware(
 
 # --- RUTAS DE ARCHIVOS ---
 ruta_actual = os.path.dirname(os.path.abspath(__file__))
-ruta_csv = os.path.join(ruta_actual, 'ventas_trendmode.csv')
-ruta_json = os.path.join(ruta_actual, 'inventario.json') # <-- Ruta del nuevo JSON
+ruta_productos = os.path.join(ruta_actual, 'productos.csv')
+ruta_ventas = os.path.join(ruta_actual, 'ventas.csv')
 
-# --- LÓGICA DE PERSISTENCIA DEL INVENTARIO (JSON) ---
-def cargar_inventario():
-    if os.path.exists(ruta_json):
-        with open(ruta_json, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    else:
-        # Inventario inicial (si el JSON no existe, se crea con estos datos)
-        inventario_inicial = [
-            {"id": 1, "nombre": "Pantalón Mezclilla", "precio": 699.0, "cantidad": 50, "categoria": "Pantalones"},
-            {"id": 2, "nombre": "Chaqueta Cuero", "precio": 1299.0, "cantidad": 20, "categoria": "Chaquetas"},
-            {"id": 3, "nombre": "Vestido Floral", "precio": 899.0, "cantidad": 30, "categoria": "Vestidos"},
-            {"id": 4, "nombre": "Camisa Blanca", "precio": 399.0, "cantidad": 60, "categoria": "Camisas"}
-        ]
-        guardar_inventario(inventario_inicial)
-        return inventario_inicial
-
-def guardar_inventario(datos):
-    with open(ruta_json, 'w', encoding='utf-8') as f:
-        json.dump(datos, f, indent=4, ensure_ascii=False)
-
-# Inicializamos el inventario desde el JSON
-inventario = cargar_inventario()
+# --- FUNCIÓN AUXILIAR PARA LEER PRODUCTOS (A PRUEBA DE BALAS) ---
+def leer_productos_seguro():
+    # Si no existe o está vacío, creamos el esqueleto
+    if not os.path.exists(ruta_productos) or os.path.getsize(ruta_productos) == 0:
+        df = pd.DataFrame(columns=["id", "nombre", "precio", "cantidad", "categoria"])
+        df.to_csv(ruta_productos, index=False, encoding='utf-8')
+        return df
+    
+    try:
+        # Leemos forzando a que todo sea string primero
+        df = pd.read_csv(ruta_productos, dtype=str, encoding='utf-8')
+        
+        # Limpiamos los nombres de las columnas (quitamos espacios en blanco invisibles)
+        df.columns = df.columns.str.strip()
+        
+        # Verificamos que las columnas vitales existan
+        if 'id' not in df.columns or 'nombre' not in df.columns:
+            raise ValueError("Columnas incorrectas")
+            
+        return df
+    except Exception as e:
+        print(f"⚠️ Archivo corrupto, reiniciando... {e}")
+        df = pd.DataFrame(columns=["id", "nombre", "precio", "cantidad", "categoria"])
+        df.to_csv(ruta_productos, index=False, encoding='utf-8')
+        return df
 
 # Modelos de Pydantic
 class CrearProducto(BaseModel):
-    nombre: str = Field(..., min_length=1, description="Nombre del producto")
-    precio: float = Field(..., gt=0, description="Precio del producto")
-    cantidad: int = Field(..., ge=0, description="Cantidad del producto")
-    # Nota: No puse 'categoria' en el modelo porque el HTML actual no lo pide.
-    # Si luego agregas un <select> en el HTML, puedes agregarlo aquí.
+    nombre: str = Field(..., min_length=1)
+    precio: float = Field(..., gt=0)
+    cantidad: int = Field(..., ge=0)
+    categoria: str = Field(default="General")
 
 class RespuestaProducto(BaseModel):
     id: int
     nombre: str
     precio: float
     cantidad: int
-    categoria: str = "Compra_Web" # Valor por defecto por si acaso
-
-# Función auxiliar para simular latencia
-async def simular_conexion_db(segundos: float = 0.5):
-    await asyncio.sleep(segundos)
+    categoria: str
 
 # ============================================================
-# ENDPOINTS
+# ENDPOINTS DE PRODUCTOS (CSV)
 # ============================================================
-
-@app.get("/")
-async def home():
-    return {"Message": "API de TrendMode MX funcionando correctamente"}
-
-@app.get("/ventas-por-categoria")
-async def get_ventas_por_categoria():
-    try:
-        df = pd.read_csv(ruta_csv, encoding='utf-8')
-        ventas = df.groupby('Categoria')['Total_Venta'].sum().reset_index()
-        return ventas.to_dict(orient="records")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/productos")
 async def getProductos():
-    await simular_conexion_db(0.5)
-    return inventario
+    try:
+        df = leer_productos_seguro()
+        if df.empty:
+            return []
+        
+        # Convertimos los tipos numéricos de forma segura
+        df['precio'] = pd.to_numeric(df['precio'], errors='coerce').fillna(0)
+        df['cantidad'] = pd.to_numeric(df['cantidad'], errors='coerce').fillna(0).astype(int)
+        df['id'] = pd.to_numeric(df['id'], errors='coerce').fillna(0).astype(int)
+        
+        return df.to_dict(orient="records")
+    except Exception as e:
+        print(f"Error en GET productos: {e}")
+        return []
 
 @app.post("/productos", response_model=RespuestaProducto, status_code=status.HTTP_201_CREATED)
 async def addProducto(producto: CrearProducto):
     try:
-        await simular_conexion_db(0.5)
-        nuevo_id = max((p["id"] for p in inventario), default=0) + 1
+        df = leer_productos_seguro()
+        
+        # Calculamos el nuevo ID
+        if df.empty:
+            nuevo_id = 1
+        else:
+            # Extraemos IDs válidos y buscamos el mayor
+            ids_validos = pd.to_numeric(df['id'], errors='coerce').dropna()
+            nuevo_id = int(ids_validos.max() + 1) if not ids_validos.empty else 1
+        
         nuevo_producto = {
-            "id": nuevo_id,    
-            "nombre": producto.nombre,
+            "id": nuevo_id,
+            "nombre": producto.nombre.strip(),
             "precio": producto.precio,
             "cantidad": producto.cantidad,
-            "categoria": "Compra_Web" # Como el form no pide categoría, le ponemos esta por defecto
+            "categoria": producto.categoria.strip()
         }
-        inventario.append(nuevo_producto)
-        guardar_inventario(inventario) # <-- GUARDAMOS EN EL JSON
+        
+        # En lugar de hacer un append ciego, reescribimos el DataFrame completo
+        # Esto asegura que las columnas siempre queden perfectamente alineadas
+        df_nuevo = pd.DataFrame([nuevo_producto])
+        df_final = pd.concat([df, df_nuevo], ignore_index=True)
+        
+        # Guardamos todo el archivo de nuevo, limpio
+        df_final.to_csv(ruta_productos, index=False, encoding='utf-8')
+        
         return nuevo_producto
-    except Exception as error:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
-            detail=f"Error en la base de datos: {str(error)}"
-        )
+    except Exception as e:
+        print(f"Error en POST productos: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.put("/productos/{producto_id}/comprar", response_model=RespuestaProducto)
 async def comprarProducto(producto_id: int, cantidad_comprada: int):
     try:
-        await simular_conexion_db(0.5)
+        df = leer_productos_seguro()
         
-        for producto in inventario:
-            if producto["id"] == producto_id:
-                if producto["cantidad"] < cantidad_comprada:
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="No hay suficiente stock disponible"
-                    )
-                
-                # 1. Restamos el stock en memoria
-                producto["cantidad"] -= cantidad_comprada
-                
-                # 2. PERSISTENCIA: Guardamos la venta en el CSV
-                try:
-                    timestamp_id = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
-                    fecha_actual = datetime.now().strftime('%d/%m/%Y')
-                    
-                    nueva_venta = {
-                        'ID_Venta': f'WEB_{timestamp_id}',
-                        'Fecha': fecha_actual,
-                        'Tienda': 'Tienda_Online',
-                        'Producto': producto["nombre"],
-                        'Categoria': producto.get("categoria", "Compra_Web"), # <-- Usa la categoría real
-                        'Talla': 'N/A',
-                        'Cantidad': cantidad_comprada,
-                        'Precio_Unitario': producto["precio"],
-                        'Descuento': 0.0,
-                        'Total_Venta': producto["precio"] * cantidad_comprada,
-                        'Metodo_Pago': 'Web',
-                        'Cliente_Frecuente': False
-                    }
-                    
-                    df_nueva_venta = pd.DataFrame([nueva_venta])
-                    df_nueva_venta.to_csv(ruta_csv, mode='a', header=False, index=False, encoding='utf-8')
-                    
-                    print(f"✅ Venta guardada en CSV con ID: {timestamp_id}")
-                    
-                except Exception as e:
-                    print(f"⚠️ Error al guardar en el CSV: {e}")
-                
-                # 3. GUARDAMOS EL NUEVO STOCK EN EL JSON
-                guardar_inventario(inventario) 
-                
-                return producto
-                
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, 
-            detail="El producto no fue encontrado"
-        )
-    except HTTPException as http_err:
-        raise http_err
+        # Convertimos el id a número para comparar
+        df['id_num'] = pd.to_numeric(df['id'], errors='coerce')
+        index = df.index[df['id_num'] == producto_id].tolist()
+        
+        if not index:
+            raise HTTPException(status_code=404, detail="Producto no encontrado")
+        
+        i = index[0]
+        
+        stock_actual = int(pd.to_numeric(df.at[i, 'cantidad'], errors='coerce'))
+        precio_actual = float(pd.to_numeric(df.at[i, 'precio'], errors='coerce'))
+        
+        if stock_actual < cantidad_comprada:
+            raise HTTPException(status_code=400, detail="No hay suficiente stock")
+        
+        # 1. Restar stock
+        df.at[i, 'cantidad'] = stock_actual - cantidad_comprada
+        df = df.drop(columns=['id_num']) # Limpiamos la columna temporal
+        df.to_csv(ruta_productos, index=False, encoding='utf-8')
+        
+        # 2. Registrar venta
+        timestamp_id = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
+        fecha_actual = datetime.now().strftime('%d/%m/%Y')
+        
+        nueva_venta = {
+            'ID_Venta': f'WEB_{timestamp_id}',
+            'Fecha': fecha_actual,
+            'Tienda': 'Tienda_Online',
+            'Producto': str(df.at[i, 'nombre']).strip(),
+            'Categoria': str(df.at[i, 'categoria']).strip(),
+            'Cantidad': cantidad_comprada,
+            'Precio_Unitario': precio_actual,
+            'Total_Venta': precio_actual * cantidad_comprada,
+            'Talla': 'N/A',
+            'Descuento': 0.0,
+            'Metodo_Pago': 'Web',
+            'Cliente_Frecuente': 'FALSE'
+        }
+        
+        archivo_existe = os.path.exists(ruta_ventas)
+        df_venta = pd.DataFrame([nueva_venta])
+        
+        if archivo_existe:
+            columnas_originales = pd.read_csv(ruta_ventas, nrows=0, encoding='utf-8').columns.tolist()
+            df_venta = df_venta.reindex(columns=columnas_originales, fill_value="")
+            
+        df_venta.to_csv(ruta_ventas, mode='a', header=not archivo_existe, index=False, encoding='utf-8')
+        
+        return {
+            "id": producto_id,
+            "nombre": str(df.at[i, 'nombre']),
+            "precio": precio_actual,
+            "cantidad": stock_actual - cantidad_comprada,
+            "categoria": str(df.at[i, 'categoria'])
+        }
+    except HTTPException as he:
+        raise he
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
-            detail=f"Error al comprar: {str(e)}"
-        )
+        print(f"Error en PUT comprar: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.delete("/productos/{producto_id}")
 async def deleteProducto(producto_id: int):
     try:
-        await simular_conexion_db(0.5)
-        for producto in inventario:
-            if producto["id"] == producto_id:
-                inventario.remove(producto)
-                guardar_inventario(inventario) # <-- GUARDAMOS LA ELIMINACIÓN EN EL JSON
-                return {"Message": f"El producto {producto_id} fue eliminado"}
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, 
-            detail="El producto no fue encontrado"
-        )
-    except HTTPException as http_err:
-        raise http_err
+        df = leer_productos_seguro()
+        
+        df['id_num'] = pd.to_numeric(df['id'], errors='coerce')
+        if producto_id not in df['id_num'].values:
+            raise HTTPException(status_code=404, detail="Producto no encontrado")
+        
+        df = df[df['id_num'] != producto_id]
+        df = df.drop(columns=['id_num'])
+        
+        df.to_csv(ruta_productos, index=False, encoding='utf-8')
+        return {"Message": f"Producto {producto_id} eliminado"}
+    except HTTPException as he:
+        raise he
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
-            detail=f"Error al eliminar: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ============================================================
+# ENDPOINTS ANALÍTICOS (DASHBOARD)
+# ============================================================
+
+@app.get("/kpis")
+async def get_kpis():
+    try:
+        if not os.path.exists(ruta_ventas):
+            return {"ingresos_totales": 0, "transacciones": 0, "producto_estrella": "N/A"}
+            
+        df = pd.read_csv(ruta_ventas, encoding='utf-8')
+        df.columns = df.columns.str.strip()
+        
+        if df.empty:
+            return {"ingresos_totales": 0, "transacciones": 0, "producto_estrella": "N/A"}
+        
+        ingresos = float(df['Total_Venta'].sum())
+        transacciones = int(len(df))
+        
+        ventas_por_producto = df.groupby('Producto')['Cantidad'].sum()
+        producto_estrella = ventas_por_producto.idxmax() if not ventas_por_producto.empty else "N/A"
+        
+        return {
+            "ingresos_totales": ingresos,
+            "transacciones": transacciones,
+            "producto_estrella": producto_estrella
+        }
+    except Exception as e:
+        print("Error KPIs:", e)
+        return {"ingresos_totales": 0, "transacciones": 0, "producto_estrella": "N/A"}
+
+@app.get("/ventas-por-producto")
+async def get_ventas_por_producto():
+    try:
+        if not os.path.exists(ruta_ventas):
+            return []
+        df = pd.read_csv(ruta_ventas, encoding='utf-8')
+        df.columns = df.columns.str.strip()
+        
+        ventas = df.groupby('Producto')['Total_Venta'].sum().reset_index()
+        ventas = ventas.sort_values(by='Total_Venta', ascending=False)
+        return ventas.to_dict(orient="records")
+    except Exception:
+        return []
+
+@app.get("/ventas-por-fecha")
+async def get_ventas_por_fecha():
+    try:
+        if not os.path.exists(ruta_ventas):
+            return []
+        df = pd.read_csv(ruta_ventas, encoding='utf-8')
+        df.columns = df.columns.str.strip()
+        
+        df['Fecha_DT'] = pd.to_datetime(df['Fecha'], format='%d/%m/%Y', errors='coerce')
+        df = df.dropna(subset=['Fecha_DT'])
+        
+        ventas = df.groupby('Fecha_DT')['Total_Venta'].sum().reset_index()
+        ventas = ventas.sort_values(by='Fecha_DT')
+        
+        ventas['Fecha'] = ventas['Fecha_DT'].dt.strftime('%d/%m/%Y')
+        return ventas[['Fecha', 'Total_Venta']].to_dict(orient="records")
+    except Exception:
+        return []
