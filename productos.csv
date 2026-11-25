@@ -1,6 +1,41 @@
 id,nombre,precio,cantidad,categoria
-1,Pantalón Mezclilla,699,50,Pantalones
-2,Chaqueta Cuero,1299,20,Chaquetas
-3,Vestido Floral,899,30,Vestidos
-4,Camisa Blanca,399,60,Camisas
-5,Vestido Liso,1000,10,Vestidos
+1,Calcetines,99,465,Accesorios
+2,Playera Básica,199,285,Camisas
+3,Gorra Snapback,249,280,Accesorios
+4,Bufanda Lana,299,220,Accesorios
+5,Top Deportivo,299,200,Tops
+6,Cinturón Cuero,349,180,Accesorios
+7,Camisa Blanca,399,160,Camisas
+8,Falda Corta,399,150,Faldas
+9,Shorts Denim,449,120,Shorts
+10,Blusa Seda,499,110,Blusas
+11,Falda Plisada,599,80,Faldas
+12,Suéter Tejido,599,70,Suéteres
+13,Pantalón Mezclilla,699,60,Pantalones
+14,Sudadera Oversize,699,50,Sudaderas
+15,Vestido Floral,899,40,Vestidos
+16,Bolsa Piel,899,30,Accesorios
+17,Zapatos Piel,999,25,Calzado
+18,Vestido Liso,1000,20,Vestidos
+19,Chaqueta Cuero,1299,15,Chaquetas
+20,Chamarra Gala,1599,10,Chaquetas
+21,Medias Deportivas,89,450,Accesorios
+22,Pañuelo Estampado,129,400,Accesorios
+23,Calcetines Largos,149,380,Accesorios
+24,Diadema Brillante,179,320,Accesorios
+25,Playera Estampada,229,300,Camisas
+26,Top Crop Básico,249,280,Tops
+27,Short Playa,279,260,Shorts
+28,Falda Deportiva,299,240,Faldas
+29,Mochila Mini,329,220,Accesorios
+30,Playera Manga Larga,349,200,Camisas
+31,Blusa Tirantes,379,180,Blusas
+32,Short Mezclilla,429,160,Shorts
+33,Top Halter,449,140,Tops
+34,Falda Larga,499,120,Faldas
+35,Pantalón Jogger,599,100,Pantalones
+36,Sudadera Con Capucha,699,80,Sudaderas
+37,Vestido Corto,799,60,Vestidos
+38,Chaqueta Mezclilla,1099,35,Chaquetas
+39,Abrigo Largo,1399,20,Chaquetas
+40,Chamarra Piel Sintética,1699,10,Chaquetas
